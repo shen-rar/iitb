@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intelligent 3D Spatial Engine</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0f1a; color: #e8edf5; overflow: hidden; }
+    #canvas-container { width: 100vw; height: 100vh; position: relative; }
+    #ui-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; }
+    .panel { pointer-events: auto; background: rgba(10, 15, 26, 0.92); border: 1px solid rgba(100, 180, 255, 0.2); border-radius: 12px; backdrop-filter: blur(8px); padding: 16px; max-width: 380px; }
+    .panel-header { font-weight: 600; font-size: 14px; color: #64b4ff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .search-box { display: flex; gap: 8px; margin-bottom: 12px; }
+    .search-box input { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid rgba(100,180,255,0.3); border-radius: 8px; padding: 10px 12px; color: #e8edf5; font-size: 14px; outline: none; }
+    .search-box input:focus { border-color: #64b4ff; }
+    .search-box button { background: linear-gradient(135deg, #64b4ff, #0077cc); border: none; border-radius: 8px; padding: 0 16px; color: white; font-weight: 500; cursor: pointer; }
+    .poi-results { max-height: 200px; overflow-y: auto; display: none; }
+    .poi-item { background: rgba(100,180,255,0.1); border: 1px solid rgba(100,180,255,0.2); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; }
+    .poi-item:hover { background: rgba(100,180,255,0.2); border-color: #64b4ff; }
+    .poi-item .label { font-weight: 500; font-size: 13px; color: #64b4ff; }
+    .poi-item .meta { font-size: 11px; color: #8ab4d8; margin-top: 4px; display: flex; gap: 12px; }
+    .status-bar { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(10,15,26,0.9); border: 1px solid rgba(100,180,255,0.2); border-radius: 50px; padding: 10px 20px; display: flex; gap: 20px; font-size: 12px; color: #8ab4d8; z-index: 20; pointer-events: auto; }
+    .status-item { display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+    .status-dot.warning { background: #f59e0b; }
+    .hint { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(10,15,26,0.85); border: 1px solid rgba(100,180,255,0.15); border-radius: 50px; padding: 8px 16px; font-size: 12px; color: #64748b; z-index: 15; pointer-events: none; }
+    .top-left { top: 20px; left: 20px; }
+    .top-right { top: 20px; right: 20px; }
+    .nav-info { display: none; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12px; color: #34d399; }
+    .nav-info.active { display: block; }
+    .nav-info .row { display: flex; justify-content: space-between; margin: 4px 0; }
+    .nav-info .value { font-weight: 500; }
+    .clear-btn { background: transparent; border: 1px solid rgba(239,68,68,0.4); color: #f87171; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
+    .clear-btn:hover { background: rgba(239,68,68,0.1); }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="ui-overlay">
+    <div class="panel top-left" id="search-panel">
+      <div class="panel-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <span>Spatial POI Search</span>
+      </div>
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="Search: fire extinguisher, espresso machine..." autocomplete="off">
+        <button id="search-btn">Search</button>
+      </div>
+      <div class="nav-info" id="nav-info">
+        <div class="row"><span class="label">Distance</span><span class="value" id="nav-distance">-</span></div>
+        <div class="row"><span class="label">Clearance</span><span class="value" id="nav-clearance">-</span></div>
+        <div class="row"><span class="label">Waypoints</span><span class="value" id="nav-waypoints">-</span></div>
+        <button class="clear-btn" id="clear-path-btn">Clear Path</button>
+      </div>
+      <div class="poi-results" id="poi-results"></div>
+    </div>
+    <div class="panel top-right" id="info-panel">
+      <div class="panel-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        <span>Scene Info</span>
+      </div>
+      <div id="scene-info">Loading scene...</div>
+    </div>
+    <div class="status-bar" id="status-bar">
+      <div class="status-item"><span class="status-dot" id="conn-status"></span><span id="conn-text">Connecting...</span></div>
+      <div class="status-item"><span class="status-dot" id="mesh-status"></span><span id="mesh-text">Mesh: -</span></div>
+      <div class="status-item"><span class="status-dot" id="splat-status"></span><span id="splat-text">Splats: -</span></div>
+    </div>
+    <div class="hint">Double-click floor to navigate &bull; Type to search POIs &bull; WASD for manual walk</div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
