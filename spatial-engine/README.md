@@ -43,7 +43,10 @@ Layout modelled on the renderify field viewer: plan map, real-frame panel, enter
 
 | Action | Control |
 |---|---|
-| Orbit / pan / zoom | mouse |
+| Turn around in place (360°) | drag; the viewer starts inside the room at a capture spot, at eye height |
+| Automatic 360° look-around | **O** |
+| Previous / next capture spot | **[** / **]** (spots where the camera actually stood, so splats look sharpest) |
+| Orbit / pan / zoom the whole scene | **M** (overview), then mouse |
 | Walk first person (wall collision) | **F**, then WASD + mouse, Shift sprints, Esc exits |
 | Auto-navigate to a spot | double-click the floor |
 | POI search + fly-to | type a label, e.g. "espresso machine" |
@@ -59,7 +62,13 @@ Set `VITE_API_BASE_URL` for a remote backend. Viewing works without the backend;
 pip install torch --index-url https://download.pytorch.org/whl/cu128
 python train_splats.py <colmap_model_dir> <image_dir> <scene_id> --iters 2500
 ```
-Writes `artifacts/visual_splats.ply`, which the viewer prefers over the point cloud. The trainer is pure PyTorch (no compiler needed); use the reference gsplat/3DGS on Linux for best quality.
+Writes `artifacts/visual_splats.ply`, which the viewer prefers over the point cloud. The trainer is pure PyTorch (no compiler needed): all screen tiles are rasterised in one batched GPU pass, and gaussians are cloned or split relative to the scene size. Use the reference gsplat/3DGS on Linux for best quality.
+
+## Capture quality report
+`artifacts/scene_report.json` records registered images, points, mean reprojection error and
+`largest_view_direction_gap_deg`: the widest horizontal angle no camera looked towards. Under
+about 45° means you can turn around anywhere in the scene and see captured content. To get there,
+pan slowly through a full turn in each room while walking.
 
 ## Sample data
 `tests/data/library_sample/` holds 30 frames of a public indoor video (CC BY-SA 4.0, see ATTRIBUTION.txt).

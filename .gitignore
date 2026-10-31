@@ -26,3 +26,7 @@ dist/
 
 # Logs
 *.log
+
+# Scene build intermediates (rebuilt by build_scene.py; COLMAP databases are 50-100 MB)
+spatial-engine/data/scenes/*/colmap/
+spatial-engine/data/scenes/*/keyframes/

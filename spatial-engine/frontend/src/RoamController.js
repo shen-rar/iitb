@@ -48,6 +48,9 @@ export class RoamController {
       else if (k === 'p') this.toggleVisual();
       else if (k === 'u') this.toggleMeasure();
       else if (k === 'f') this.toggleWalk();
+      else if (!this.walking && k === 'o') this.viewer.toggleLookAround();
+      else if (!this.walking && k === '[') this.viewer.enterViewpoint((this.viewer.viewpointIndex ?? 0) - 1);
+      else if (!this.walking && k === ']') this.viewer.enterViewpoint((this.viewer.viewpointIndex ?? 0) + 1);
     } else {
       this.keys.delete(k);
     }
@@ -60,15 +63,20 @@ export class RoamController {
     if (this.planView) this.togglePlan();
     const v = this.viewer;
     v.controls.enabled = false;
+    v.controls.autoRotate = false;
     v.camera.position.y = this.floorY() + EYE_HEIGHT;
     this.fp.lock();
     this.walking = true;
     this._emitMode();
     this.fp.addEventListener('unlock', () => {
       v.controls.enabled = true;
-      const f = new THREE.Vector3();
-      v.camera.getWorldDirection(f);
-      v.controls.target.copy(v.camera.position).addScaledVector(f, 2);
+      if (v.inside) {
+        v.setInside(true); // keep turning in place where the walk ended
+      } else {
+        const f = new THREE.Vector3();
+        v.camera.getWorldDirection(f);
+        v.controls.target.copy(v.camera.position).addScaledVector(f, 2);
+      }
     }, { once: true });
   }
 
@@ -77,7 +85,8 @@ export class RoamController {
     if (this.walking) this.fp.unlock();
     this.planView = !this.planView;
     if (this.planView) {
-      this.savedPose = { pos: v.camera.position.clone(), target: v.controls.target.clone() };
+      this.savedPose = { pos: v.camera.position.clone(), target: v.controls.target.clone(), inside: !!v.inside };
+      if (v.inside) v.setInside(false); // overview needs normal orbit + zoom
       const box = this._sceneBounds();
       const c = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
@@ -86,6 +95,7 @@ export class RoamController {
     } else if (this.savedPose) {
       v.camera.position.copy(this.savedPose.pos);
       v.controls.target.copy(this.savedPose.target);
+      if (this.savedPose.inside) v.setInside(true);
     }
     this._emitMode();
   }
@@ -163,9 +173,11 @@ export class RoamController {
 
   applyLinkPose() {
     const cam = new URLSearchParams(window.location.search).get('cam');
-    if (!cam) return;
+    if (!cam) return false;
     const [x, y, z] = cam.split(',').map(Number);
-    if ([x, y, z].every(Number.isFinite)) this.viewer.camera.position.set(x, y, z);
+    if (![x, y, z].every(Number.isFinite)) return false;
+    this.viewer.camera.position.set(x, y, z);
+    return true;
   }
 
   _blocked(dir) {

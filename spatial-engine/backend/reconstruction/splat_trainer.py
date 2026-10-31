@@ -13,6 +13,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
+from torch.utils.checkpoint import checkpoint
 
 TILE = 16
 SH_C0 = 0.28209479177387814
@@ -75,7 +76,7 @@ class Splats(torch.nn.Module):
         return self.means.shape[0]
 
 
-def render(sp: Splats, w2c, K, H, W, bg=0.0, max_per_tile=384):
+def render(sp: Splats, w2c, K, H, W, bg=0.0, max_per_tile=1024):
     fx, fy, cx, cy = K
     p_cam = sp.means @ w2c[:3, :3].T + w2c[:3, 3]
     z = p_cam[:, 2]
@@ -110,34 +111,55 @@ def render(sp: Splats, w2c, K, H, W, bg=0.0, max_per_tile=384):
     u, v, rad = u[order], v[order], rad[order]
     ia, ib, ic, opac, col = ia[order], ib[order], ic[order], opac[order], col[order]
 
+    dev = z.device
     ty, tx = math.ceil(H / TILE), math.ceil(W / TILE)
-    x0 = torch.arange(tx, device=z.device) * TILE
-    y0 = torch.arange(ty, device=z.device) * TILE
+    n = u.shape[0]
+    if n == 0:
+        return torch.full((H, W, 3), bg, device=dev)
+    x0 = torch.arange(tx, device=dev) * TILE
+    y0 = torch.arange(ty, device=dev) * TILE
     ov_x = (u[None, :] + rad[None, :] >= x0[:, None]) & (u[None, :] - rad[None, :] <= (x0[:, None] + TILE))
     ov_y = (v[None, :] + rad[None, :] >= y0[:, None]) & (v[None, :] - rad[None, :] <= (y0[:, None] + TILE))
-    rows = []
-    for j in range(ty):
-        row = []
-        for i in range(tx):
-            h = min(TILE, H - j * TILE)
-            w = min(TILE, W - i * TILE)
-            idx = torch.nonzero(ov_x[i] & ov_y[j], as_tuple=False).squeeze(1)[:max_per_tile]
-            if len(idx) == 0:
-                row.append(torch.full((h, w, 3), bg, device=z.device))
-                continue
-            ys, xs = torch.meshgrid(torch.arange(j * TILE, j * TILE + h, device=z.device),
-                                    torch.arange(i * TILE, i * TILE + w, device=z.device), indexing="ij")
-            dx = xs.reshape(-1, 1).float() + 0.5 - u[idx][None]
-            dy = ys.reshape(-1, 1).float() + 0.5 - v[idx][None]
-            pw = -0.5 * (ia[idx][None] * dx * dx + 2 * ib[idx][None] * dx * dy + ic[idx][None] * dy * dy)
-            alpha = (opac[idx][None] * torch.exp(pw.clamp(max=0))).clamp(max=0.99)
-            alpha = torch.where(alpha < 1 / 255, torch.zeros_like(alpha), alpha)
-            T = torch.cumprod(torch.cat([torch.ones_like(alpha[:, :1]), 1 - alpha[:, :-1]], 1), 1)
-            wgt = alpha * T
-            pix = wgt @ col[idx] + (1 - wgt.sum(1, keepdim=True)) * bg
-            row.append(pix.reshape(h, w, 3))
-        rows.append(torch.cat(row, 1))
-    return torch.cat(rows, 0)
+
+    # All tiles in one batched pass (chunked to bound memory) instead of a Python loop per tile.
+    # Gaussians are depth sorted, so a stable sort of "not in tile" keeps each tile's first K
+    # hits front to back.
+    py, px = torch.meshgrid(torch.arange(TILE, device=dev), torch.arange(TILE, device=dev), indexing="ij")
+    py, px = py.reshape(-1).float() + 0.5, px.reshape(-1).float() + 0.5
+    tile_y = y0[:, None].expand(ty, tx).reshape(-1).float()
+    tile_x = x0[None, :].expand(ty, tx).reshape(-1).float()
+    out = []
+    for s in range(0, ty * tx, 64):
+        tj = torch.arange(s, min(s + 64, ty * tx), device=dev)
+        mask = ov_y[tj // tx] & ov_x[tj % tx]                                    # [t, n]
+        # pad only to the busiest tile in this chunk; a low cap truncates tiles where large
+        # near-camera gaussians fill the slots, which shows up as blocky tile edges
+        k = max(1, min(max_per_tile, int(mask.sum(1).max())))
+        idx = torch.argsort((~mask).to(torch.int8), dim=1, stable=True)[:, :k]  # [t, k]
+        hit = mask.gather(1, idx).float()
+        X = tile_x[tj, None] + px[None, :]                                         # [t, P]
+        Y = tile_y[tj, None] + py[None, :]
+        args = (u, v, ia, ib, ic, opac, col, idx, hit, X, Y, bg)
+        if torch.is_grad_enabled():
+            # recompute each chunk in backward instead of keeping every [t, P, k] intermediate:
+            # memory stays bounded by one chunk, which avoids spilling out of GPU memory
+            out.append(checkpoint(_shade_tiles, *args, use_reentrant=False))
+        else:
+            out.append(_shade_tiles(*args))
+    img = torch.cat(out, 0).reshape(ty, tx, TILE, TILE, 3).permute(0, 2, 1, 3, 4).reshape(ty * TILE, tx * TILE, 3)
+    return img[:H, :W]
+
+
+def _shade_tiles(u, v, ia, ib, ic, opac, col, idx, hit, X, Y, bg):
+    """Alpha-composite the depth-sorted gaussians idx [t, k] over pixel centres X, Y [t, P]."""
+    dx = X[:, :, None] - u[idx][:, None, :]                                       # [t, P, k]
+    dy = Y[:, :, None] - v[idx][:, None, :]
+    pw = -0.5 * (ia[idx][:, None] * dx * dx + 2 * ib[idx][:, None] * dx * dy + ic[idx][:, None] * dy * dy)
+    alpha = (opac[idx][:, None] * torch.exp(pw.clamp(max=0))).clamp(max=0.99) * hit[:, None]
+    alpha = torch.where(alpha < 1 / 255, torch.zeros_like(alpha), alpha)
+    T = torch.cumprod(torch.cat([torch.ones_like(alpha[..., :1]), 1 - alpha[..., :-1]], -1), -1)
+    wgt = alpha * T
+    return torch.einsum("tpk,tkc->tpc", wgt, col[idx]) + (1 - wgt.sum(-1, keepdim=True)) * bg
 
 
 def save_ply(sp: Splats, path: Path):
@@ -158,18 +180,34 @@ def save_ply(sp: Splats, path: Path):
         f.write(data.tobytes())
 
 
-def _densify(sp, gacc, gcnt, dev):
-    """Clone the 10% of gaussians with the largest mean positional gradient; prune transparent ones."""
+def _densify(sp, gacc, gcnt, size_thresh):
+    """For the 10% of gaussians with the largest mean positional gradient: clone the small ones,
+    split the large ones into two smaller children sampled inside the parent (as in 3DGS).
+    Transparent gaussians are pruned. size_thresh is relative to the scene, so large rooms
+    densify too."""
     avg = gacc / gcnt.clamp(min=1)
     sel = avg > torch.quantile(avg, 0.9)
     with torch.no_grad():
-        small = torch.exp(sp.log_scales).max(1).values < 0.05
-        clone = sel & small
-        keep = torch.sigmoid(sp.opac) > 0.02
+        scales = torch.exp(sp.log_scales)
+        big = scales.max(1).values > size_thresh
+        clone, split = sel & ~big, sel & big
+        # prune transparent and oversized gaussians: huge blobs smear across near views
+        oversized = scales.max(1).values > 10 * size_thresh
+        keep = (torch.sigmoid(sp.opac) > 0.02) & ~split & ~oversized
+        rot = quat_to_rot(sp.quats[split])
         for name in ("means", "log_scales", "quats", "opac", "colors"):
             p = getattr(sp, name).detach()
-            jitter = torch.randn_like(p[clone]) * 0.01 if name == "means" else 0
-            setattr(sp, name, torch.nn.Parameter(torch.cat([p[keep], p[clone] + jitter])))
+            parts = [p[keep], p[clone]]
+            if name == "means":
+                parts[1] = p[clone] + torch.randn_like(p[clone]) * 0.01
+                for _ in range(2):
+                    offset = (rot @ (torch.randn_like(scales[split]) * scales[split])[..., None]).squeeze(-1)
+                    parts.append(p[split] + offset)
+            elif name == "log_scales":
+                parts += [p[split] - math.log(1.6)] * 2
+            else:
+                parts += [p[split]] * 2
+            setattr(sp, name, torch.nn.Parameter(torch.cat(parts)))
 
 
 def train(views, K, xyz, rgb, out_path: Path, iters=2500, device="cuda", log=print, max_gauss=60000):
@@ -177,9 +215,12 @@ def train(views, K, xyz, rgb, out_path: Path, iters=2500, device="cuda", log=pri
     H, W = views[0]["img"].shape[:2]
     pts = torch.from_numpy(xyz).float().to(dev)
     cols = torch.from_numpy(rgb).float().to(dev) / 255.0
-    d = torch.cdist(pts, pts) + torch.eye(len(pts), device=dev) * 1e9
-    knn = d.topk(3, largest=False).values.mean(1)
+    # initial scale = mean distance to 3 nearest neighbours; a KD-tree avoids an N x N matrix
+    from scipy.spatial import cKDTree
+    dist, _ = cKDTree(xyz).query(xyz, k=4)  # first neighbour is the point itself
+    knn = torch.from_numpy(dist[:, 1:].mean(1)).float().to(dev)
     sp = Splats(pts, cols, knn).to(dev)
+    size_thresh = 0.01 * float(np.linalg.norm(np.ptp(xyz, axis=0)))  # 1% of the scene diagonal
     lrs = {"means": 8e-4, "log_scales": 5e-3, "quats": 1e-3, "opac": 5e-2, "colors": 2.5e-2}
 
     def make_opt():
@@ -204,7 +245,7 @@ def train(views, K, xyz, rgb, out_path: Path, iters=2500, device="cuda", log=pri
             gcnt += (g > 0).float()
         opt.step()
         if 200 <= it < iters * 0.6 and it % 100 == 0 and sp.n() < max_gauss:
-            _densify(sp, gacc, gcnt, dev)
+            _densify(sp, gacc, gcnt, size_thresh)
             opt = make_opt()
             gacc = torch.zeros(sp.n(), device=dev)
             gcnt = torch.zeros(sp.n(), device=dev)

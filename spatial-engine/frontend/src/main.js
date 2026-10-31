@@ -52,11 +52,15 @@ async function main() {
     if (roam.measuring) readout.textContent = 'Measure: click two points';
   };
   const copyLink = async (url, btn) => {
-    try { await navigator.clipboard.writeText(url); btn.textContent = 'LINK COPIED'; }
+    try { await navigator.clipboard.writeText(url); btn.textContent = 'Link copied'; }
     catch { window.prompt('Copy link', url); }
-    setTimeout(() => { btn.textContent = 'COPY LINK'; }, 1500);
+    setTimeout(() => { btn.textContent = 'Copy link'; }, 1500);
   };
   $('btn-link').onclick = () => copyLink(roam.shareLink(), $('btn-link'));
+  $('btn-look').onclick = () => viewer.toggleLookAround();
+  $('btn-prev-view').onclick = () => viewer.enterViewpoint((viewer.viewpointIndex ?? 0) - 1);
+  $('btn-next-view').onclick = () => viewer.enterViewpoint((viewer.viewpointIndex ?? 0) + 1);
+  window.addEventListener('view-mode', (e) => $('btn-look').classList.toggle('on', e.detail.lookAround));
   window.addEventListener('roam-mode', (e) => {
     $('btn-walk').classList.toggle('on', e.detail.walking);
     $('btn-plan').classList.toggle('on', e.detail.plan);
@@ -82,6 +86,8 @@ async function main() {
     setDot('splat-status', 'splat-text', layer, !(result.splatLoaded || result.pointsLoaded));
 
     const live = result.splatLoaded || result.pointsLoaded;
+    // capture-spot buttons only make sense when the scene shipped its camera path
+    for (const id of ['btn-prev-view', 'btn-next-view']) $(id).style.display = result.viewpoints ? '' : 'none';
     hud.setStamp(live, 'mesh only');
     hud.setSubtitle(`${SCENE_ID} · ${result.splatLoaded ? 'gaussian splats' : result.pointsLoaded ? 'point cloud' : 'collision mesh'} · navigation ${result.navReady ? 'on' : 'off'}`);
     hud.showReference();

@@ -146,6 +146,22 @@ export class SpatialEngineViewer {
       }
     }
 
+    // Capture viewpoints: start inside the room at eye height, where the splats were trained
+    this.viewpoints = [];
+    if (splatLoaded || pointsLoaded) {
+      try {
+        const r = await fetch(`${art}/cameras.json`);
+        if (r.ok) {
+          const cams = await r.json();
+          this.viewpoints = cams.centers.map((c, i) => ({
+            pos: new THREE.Vector3(...c),
+            fwd: cams.forwards ? new THREE.Vector3(...cams.forwards[i]) : null,
+          }));
+        }
+      } catch { /* no viewpoints: keep the overview framing */ }
+    }
+    if (this.viewpoints.length) this.enterViewpoint(Math.floor(this.viewpoints.length / 2));
+
     this.scaleFactor = 1.0;
     this.calibrated = false;
     if (this.navReady) {
@@ -154,9 +170,58 @@ export class SpatialEngineViewer {
         this.scaleFactor = c.scale_factor; this.calibrated = c.calibrated;
       } catch { /* keep defaults */ }
     }
-    this.roam.applyLinkPose();
+    if (this.roam.applyLinkPose() && this.inside) this.setInside(true);
     this._startRenderLoop();
-    return { splatLoaded, pointsLoaded, meshLoaded, navReady: this.navReady };
+    return { splatLoaded, pointsLoaded, meshLoaded, navReady: this.navReady, viewpoints: this.viewpoints.length };
+  }
+
+  /** Jump to capture viewpoint i (wraps), level the horizon and look the way the camera did. */
+  enterViewpoint(i) {
+    const n = this.viewpoints.length;
+    if (!n) return;
+    this.viewpointIndex = ((i % n) + n) % n;
+    const vp = this.viewpoints[this.viewpointIndex];
+    this.camera.position.copy(vp.pos);
+    const fwd = vp.fwd ? vp.fwd.clone().setY(0).normalize() : null;
+    this.setInside(true, fwd);
+  }
+
+  /**
+   * Inside mode turns the orbit controls into a look-around: the target sits 5 cm in front
+   * of the eye, so dragging rotates the view in place (full 360 yaw) instead of orbiting the
+   * building. Outside mode restores normal orbit, pan and zoom.
+   */
+  setInside(on, fwd = null) {
+    const c = this.controls;
+    this.inside = on;
+    if (on) {
+      if (!fwd) {
+        fwd = new THREE.Vector3();
+        this.camera.getWorldDirection(fwd);
+        fwd.y = 0;
+        if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+        fwd.normalize();
+      }
+      c.target.copy(this.camera.position).addScaledVector(fwd, 0.05);
+      c.enableZoom = false;
+      c.enablePan = false;
+      c.rotateSpeed = -0.4; // drag moves the scene with the cursor, like a panorama viewer
+    } else {
+      c.enableZoom = true;
+      c.enablePan = true;
+      c.rotateSpeed = 1.0;
+      c.autoRotate = false;
+    }
+    window.dispatchEvent(new CustomEvent('view-mode', { detail: { inside: on, lookAround: c.autoRotate } }));
+  }
+
+  /** Slow, continuous 360 turn in place (one turn every ~24 s). */
+  toggleLookAround(force) {
+    if (!this.inside) this.setInside(true);
+    const c = this.controls;
+    c.autoRotate = force ?? !c.autoRotate;
+    c.autoRotateSpeed = 2.5;
+    window.dispatchEvent(new CustomEvent('view-mode', { detail: { inside: true, lookAround: c.autoRotate } }));
   }
 
   _addVisibleRoomGeometry() {
@@ -337,7 +402,7 @@ export class SpatialEngineViewer {
       if (this.roam.walking) {
         this.roam.update(dt);
       } else {
-        this.controls.update();
+        this.controls.update(dt); // dt keeps auto look-around at the same speed on any refresh rate
       if (this.sandbox) this.sandbox.update();
       }
 

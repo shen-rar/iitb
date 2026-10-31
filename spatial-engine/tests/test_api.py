@@ -54,3 +54,20 @@ def test_map_status_and_capture(client):
 
 def test_map_requires_init(client):
     assert client.get("/api/v1/scenes/not_loaded/map").status_code == 400
+
+
+def test_collision_mesh_keeps_walked_path_free():
+    """Obstacle points on the walked camera path are SfM noise and must not block navigation."""
+    import numpy as np
+    from backend.navigation.pathplanner import IndoorSpatialPathPlanner
+    from backend.reconstruction.pycolmap_pipeline import build_collision_mesh
+
+    path = np.array([[x, 1.45, 0.0] for x in np.linspace(0, 6, 13)])
+    noise_on_path = np.array([[3.0, 1.0, 0.1]])               # within 0.45 m of the path
+    real_wall = np.array([[x, h, 2.0] for x in np.linspace(0, 6, 30) for h in (0.5, 1.0, 1.5)])
+    mesh = build_collision_mesh(np.vstack([noise_on_path, real_wall]), path)
+
+    planner = IndoorSpatialPathPlanner()
+    planner.build_navgrid_from_mesh(mesh)
+    assert all(planner.status_grid[planner.world_to_grid(p[0], p[2])] == 1 for p in path)
+    assert planner.status_grid[planner.world_to_grid(3.0, 2.0)] == 2   # the wall still blocks
