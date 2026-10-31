@@ -1,52 +1,30 @@
 #!/usr/bin/env python
-"""Create a minimal demo office scene with a collision mesh."""
-
-import trimesh
+"""Create a Y-up demo office (floor at Y=0) with furniture and a labelled POI database."""
+import json
 import numpy as np
+import trimesh
 from pathlib import Path
 
-# Create output directory
-scene_dir = Path("./data/scenes/demo_office/artifacts")
-scene_dir.mkdir(parents=True, exist_ok=True)
+art = Path("./data/scenes/demo_office/artifacts")
+art.mkdir(parents=True, exist_ok=True)
+W, D, H = 10.0, 8.0, 3.0  # X, Z, Y(up)
 
-# Create a simple office room as a mesh
-# Box dimensions: 10m x 8m x 3m (length x width x height)
-vertices = np.array([
-    # Floor corners
-    [0, 0, 0],
-    [10, 0, 0],
-    [10, 8, 0],
-    [0, 8, 0],
-    # Ceiling corners
-    [0, 0, 3],
-    [10, 0, 3],
-    [10, 8, 3],
-    [0, 8, 3],
-])
+def box(x0, z0, w, d, h, y0=0.0):
+    b = trimesh.creation.box(extents=[w, h, d])
+    b.apply_translation([x0 + w / 2, y0 + h / 2, z0 + d / 2])
+    return b
 
-# Define faces (triangles) for a box
-faces = np.array([
-    # Floor (2 triangles)
-    [0, 1, 2], [0, 2, 3],
-    # Ceiling (2 triangles)
-    [4, 6, 5], [4, 7, 6],
-    # Front wall (2 triangles)
-    [0, 5, 1], [0, 4, 5],
-    # Back wall (2 triangles)
-    [2, 7, 3], [2, 6, 7],
-    # Left wall (2 triangles)
-    [0, 3, 7], [0, 7, 4],
-    # Right wall (2 triangles)
-    [1, 5, 6], [1, 6, 2],
-])
-
-# Create mesh
-mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-
-# Export as GLB (binary glTF)
-output_path = scene_dir / "collision_mesh.glb"
-mesh.export(str(output_path))
-print(f"Created demo scene collision mesh at {output_path}")
-print(f"  - Room dimensions: 10m x 8m x 3m")
-print(f"  - Mesh vertices: {len(vertices)}")
-print(f"  - Mesh faces: {len(faces)}")
+parts = [box(0, 0, W, D, 0.02, -0.02)]                      # floor
+parts += [box(0, -0.1, W, 0.1, H), box(0, D, W, 0.1, H),   # walls
+          box(-0.1, 0, 0.1, D, H), box(W, 0, 0.1, D, H)]
+furniture = {"desk": (2, 5.5, 2.0, 0.9, 0.75), "espresso machine": (8.2, 1.0, 0.6, 0.5, 1.0),
+             "fire extinguisher": (9.5, 6.5, 0.3, 0.3, 0.6), "sofa": (5, 1.0, 2.2, 0.9, 0.8)}
+pois = []
+for name, (x, z, w, d, h) in furniture.items():
+    parts.append(box(x, z, w, d, h))
+    pois.append({"poi_id": name.replace(" ", "_"), "label": name,
+                 "centroid_xyz": [x + w / 2, h / 2, z + d / 2],
+                 "bbox_min_xyz": [x, 0, z], "bbox_max_xyz": [x + w, h, z + d]})
+trimesh.util.concatenate(parts).export(str(art / "collision_mesh.glb"))
+(art / "poi_database.json").write_text(json.dumps(pois, indent=2))
+print("demo scene written:", art)

@@ -1,0 +1,78 @@
+[
+  {
+    "poi_id": "desk",
+    "label": "desk",
+    "centroid_xyz": [
+      3.0,
+      0.375,
+      5.95
+    ],
+    "bbox_min_xyz": [
+      2,
+      0,
+      5.5
+    ],
+    "bbox_max_xyz": [
+      4.0,
+      0.75,
+      6.4
+    ]
+  },
+  {
+    "poi_id": "espresso_machine",
+    "label": "espresso machine",
+    "centroid_xyz": [
+      8.5,
+      0.5,
+      1.25
+    ],
+    "bbox_min_xyz": [
+      8.2,
+      0,
+      1.0
+    ],
+    "bbox_max_xyz": [
+      8.799999999999999,
+      1.0,
+      1.5
+    ]
+  },
+  {
+    "poi_id": "fire_extinguisher",
+    "label": "fire extinguisher",
+    "centroid_xyz": [
+      9.65,
+      0.3,
+      6.65
+    ],
+    "bbox_min_xyz": [
+      9.5,
+      0,
+      6.5
+    ],
+    "bbox_max_xyz": [
+      9.8,
+      0.6,
+      6.8
+    ]
+  },
+  {
+    "poi_id": "sofa",
+    "label": "sofa",
+    "centroid_xyz": [
+      6.1,
+      0.4,
+      1.45
+    ],
+    "bbox_min_xyz": [
+      5,
+      0,
+      1.0
+    ],
+    "bbox_max_xyz": [
+      7.2,
+      0.8,
+      1.9
+    ]
+  }
+]

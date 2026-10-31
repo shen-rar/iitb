@@ -2,73 +2,214 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Intelligent 3D Spatial Engine</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Spatial Engine · Scene view</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0f1a; color: #e8edf5; overflow: hidden; }
-    #canvas-container { width: 100vw; height: 100vh; position: relative; }
-    #ui-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; }
-    .panel { pointer-events: auto; background: rgba(10, 15, 26, 0.92); border: 1px solid rgba(100, 180, 255, 0.2); border-radius: 12px; backdrop-filter: blur(8px); padding: 16px; max-width: 380px; }
-    .panel-header { font-weight: 600; font-size: 14px; color: #64b4ff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-    .search-box { display: flex; gap: 8px; margin-bottom: 12px; }
-    .search-box input { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid rgba(100,180,255,0.3); border-radius: 8px; padding: 10px 12px; color: #e8edf5; font-size: 14px; outline: none; }
-    .search-box input:focus { border-color: #64b4ff; }
-    .search-box button { background: linear-gradient(135deg, #64b4ff, #0077cc); border: none; border-radius: 8px; padding: 0 16px; color: white; font-weight: 500; cursor: pointer; }
-    .poi-results { max-height: 200px; overflow-y: auto; display: none; }
-    .poi-item { background: rgba(100,180,255,0.1); border: 1px solid rgba(100,180,255,0.2); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; }
-    .poi-item:hover { background: rgba(100,180,255,0.2); border-color: #64b4ff; }
-    .poi-item .label { font-weight: 500; font-size: 13px; color: #64b4ff; }
-    .poi-item .meta { font-size: 11px; color: #8ab4d8; margin-top: 4px; display: flex; gap: 12px; }
-    .status-bar { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(10,15,26,0.9); border: 1px solid rgba(100,180,255,0.2); border-radius: 50px; padding: 10px 20px; display: flex; gap: 20px; font-size: 12px; color: #8ab4d8; z-index: 20; pointer-events: auto; }
-    .status-item { display: flex; align-items: center; gap: 6px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
-    .status-dot.warning { background: #f59e0b; }
-    .hint { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(10,15,26,0.85); border: 1px solid rgba(100,180,255,0.15); border-radius: 50px; padding: 8px 16px; font-size: 12px; color: #64748b; z-index: 15; pointer-events: none; }
-    .top-left { top: 20px; left: 20px; }
-    .top-right { top: 20px; right: 20px; }
-    .nav-info { display: none; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12px; color: #34d399; }
+    :root {
+      --bg: #0b1117; --glass: rgba(16, 24, 33, 0.78); --edge: rgba(148, 178, 200, 0.16);
+      --text: #e6edf3; --muted: #8b9bab; --teal: #5eead4; --gold: #f0c75e; --coral: #f07167;
+      --radius: 14px; --blur: blur(14px);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: var(--bg); width: 100%; height: 100%; overflow: hidden; }
+    body { color: var(--text); font-family: 'Manrope', system-ui, sans-serif; font-size: 13px; }
+    #canvas-container, #canvas-container canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+    .panel { background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+             border: 1px solid var(--edge); border-radius: var(--radius); box-shadow: 0 18px 40px rgba(0,0,0,.35); overflow: hidden; }
+    .panel-label { font: 600 10px 'JetBrains Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+                   padding: 10px 14px 8px; border-bottom: 1px solid var(--edge); }
+    .eyebrow { font: 600 10px 'JetBrains Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--teal); margin-bottom: 6px; }
+    button { font-family: inherit; cursor: pointer; }
+    kbd { font: 600 10px 'JetBrains Mono', monospace; background: rgba(94,234,212,.12); color: var(--teal); border: 1px solid rgba(94,234,212,.3);
+          border-radius: 6px; padding: 1px 5px; margin-left: 6px; }
+
+    #hud { position: fixed; top: 18px; left: 18px; width: min(420px, calc(100vw - 36px)); padding: 16px 18px 18px; z-index: 10; pointer-events: none; }
+    #title { font: 700 26px/1.1 'Manrope', sans-serif; letter-spacing: -.02em; }
+    #subtitle { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+    #status-stamp { position: fixed; top: 22px; right: 22px; z-index: 12; padding: 6px 12px; border-radius: 999px;
+                    background: rgba(94,234,212,.14); color: var(--teal); border: 1px solid rgba(94,234,212,.4);
+                    font: 700 11px 'JetBrains Mono', monospace; letter-spacing: .08em; display: flex; align-items: center; gap: 8px; }
+    #status-stamp::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 10px var(--teal); }
+    #status-stamp span { color: var(--muted); font-weight: 500; }
+
+    #search-panel { position: fixed; top: 176px; left: 18px; width: min(420px, calc(100vw - 36px)); z-index: 10; }
+    .search-box { display: flex; align-items: center; gap: 8px; padding: 10px; }
+    .search-box input { flex: 1; min-width: 0; background: rgba(0,0,0,.25); border: 1px solid var(--edge); border-radius: 10px;
+                        padding: 9px 12px; font: 13px 'Manrope', sans-serif; color: var(--text); outline: none; }
+    .search-box input:focus { border-color: var(--teal); }
+    .search-box button { background: var(--teal); color: #05201b; border: 0; border-radius: 10px; padding: 9px 14px; font-weight: 700; font-size: 12px; }
+    .poi-results { display: none; max-height: 180px; overflow-y: auto; padding: 0 6px 6px; }
+    .poi-item { padding: 9px 10px; border-radius: 10px; cursor: pointer; font-size: 12px; }
+    .poi-item:hover { background: rgba(94,234,212,.1); }
+    .poi-item .label { font-weight: 700; }
+    .poi-item .meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+    .nav-info { display: none; padding: 10px 14px 12px; font-size: 12px; border-top: 1px solid var(--edge); }
     .nav-info.active { display: block; }
-    .nav-info .row { display: flex; justify-content: space-between; margin: 4px 0; }
-    .nav-info .value { font-weight: 500; }
-    .clear-btn { background: transparent; border: 1px solid rgba(239,68,68,0.4); color: #f87171; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
-    .clear-btn:hover { background: rgba(239,68,68,0.1); }
+    .nav-info .row { display: flex; justify-content: space-between; margin: 3px 0; color: var(--muted); }
+    .nav-info .value { color: var(--text); font-weight: 700; }
+    #clear-path-btn { margin-top: 8px; background: transparent; border: 1px solid var(--edge); color: var(--text); border-radius: 999px; padding: 4px 12px; font-size: 11px; font-weight: 600; }
+
+    #ref-panel { position: fixed; top: 22px; right: 22px; width: 240px; margin-top: 52px; z-index: 10; }
+    #ref-panel img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+    #ref-panel small { display: block; padding: 8px 14px 10px; font-size: 11px; color: var(--muted); }
+    #ref-panel.empty { display: none; }
+
+    #map-wrap { position: fixed; top: 320px; right: 22px; width: 240px; z-index: 10; }
+    #minimap { display: block; width: 240px; height: 240px; cursor: crosshair; background: #0a0f14; }
+    #map-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 10px 14px 12px; font-size: 11px; color: var(--muted); }
+    #map-legend span { display: inline-flex; align-items: center; white-space: nowrap; }
+    #map-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 3px; margin-right: 6px; }
+    .sw-free { background: #8fd3c2; } .sw-obstacle { background: var(--coral); } .sw-unknown { background: #2d3a48; }
+    .sw-path { background: var(--gold); } .sw-route { background: #ffffff; } .sw-prop { background: #b79cff; }
+
+    #sandbox { position: fixed; left: 18px; bottom: 96px; width: 268px; z-index: 14; }
+    #sandbox.hidden, #sandbox-carry-actions.hidden, #reticle.hidden, #reticle-label.hidden, #carry-hint.hidden { display: none; }
+    .sb-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; font-weight: 700; font-size: 13px; }
+    .sb-head em { font: 600 10px 'JetBrains Mono', monospace; font-style: normal; color: var(--gold); margin-left: 8px; }
+    #sandbox-close { background: transparent; border: 0; color: var(--muted); font-size: 18px; line-height: 1; }
+    #prop-palette { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px; }
+    #prop-palette button, #sandbox-carry-actions button, #sandbox-actions button {
+      background: rgba(255,255,255,.04); color: var(--text); border: 1px solid var(--edge); border-radius: 10px;
+      padding: 8px 10px; font-size: 12px; font-weight: 600; text-align: left; }
+    #prop-palette button.on, #prop-palette button:hover, #sandbox-carry-actions button:hover, #sandbox-actions button:hover {
+      border-color: var(--teal); background: rgba(94,234,212,.12); }
+    #sandbox-carry-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 10px 10px; }
+    #sandbox-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 10px 10px; }
+    #sandbox-actions button, #sandbox-carry-actions button { text-align: center; font-size: 11px; }
+    #sandbox-hint { padding: 10px 14px 12px; font-size: 11px; color: var(--muted); line-height: 1.7; border-top: 1px solid var(--edge); }
+    #sandbox-hint b { font: 600 10px 'JetBrains Mono', monospace; color: var(--teal); }
+
+    #help { position: fixed; bottom: 18px; left: 18px; z-index: 10; padding: 10px 14px; font-size: 11px; color: var(--muted); line-height: 1.6; pointer-events: none; }
+    #help b { font: 600 10px 'JetBrains Mono', monospace; color: var(--text); background: rgba(255,255,255,.07); border-radius: 5px; padding: 1px 5px; margin-right: 3px; }
+    #help span { display: block; margin-top: 4px; color: var(--muted); opacity: .8; }
+
+    #center-hint { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 11; background: var(--teal); color: #05201b;
+                   border: 0; border-radius: 999px; padding: 13px 24px; font: 700 14px 'Manrope', sans-serif; letter-spacing: .01em; cursor: pointer;
+                   box-shadow: 0 0 0 8px rgba(94,234,212,.12), 0 14px 34px rgba(0,0,0,.4); }
+    #center-hint.hidden { display: none; }
+    #reticle { position: fixed; left: 50%; top: 50%; width: 12px; height: 12px; transform: translate(-50%, -50%); z-index: 11;
+               border: 1.5px solid var(--gold); border-radius: 50%; box-shadow: 0 0 0 3px rgba(240,199,94,.15); }
+    #reticle-label { position: fixed; left: 50%; top: calc(50% + 22px); transform: translateX(-50%); z-index: 11; background: rgba(0,0,0,.6);
+                     color: var(--gold); font: 600 11px 'JetBrains Mono', monospace; padding: 3px 8px; border-radius: 999px; }
+    #carry-hint { position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%); z-index: 11; background: var(--glass); color: var(--text);
+                  border: 1px solid var(--edge); border-radius: 999px; padding: 7px 14px; font-size: 12px; backdrop-filter: var(--blur); }
+    #toast { position: fixed; left: 50%; top: 22px; transform: translateX(-50%); z-index: 30; background: var(--gold); color: #1d1606; padding: 8px 14px;
+             border-radius: 999px; font-size: 12px; font-weight: 700; display: none; }
+    #readout { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) translateY(-90px); z-index: 25; background: var(--glass);
+               color: var(--text); border: 1px solid var(--gold); border-radius: 12px; padding: 9px 14px; font-size: 12px; font-weight: 600; display: none; }
+
+    #toolbar { position: fixed; top: 270px; left: 18px; width: 220px; z-index: 10; display: flex; flex-direction: column; gap: 6px; }
+    #toolbar.hidden { display: none; }
+    #toolbar button { background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); color: var(--text);
+                      border: 1px solid var(--edge); border-radius: 999px; padding: 8px 14px; font-size: 12px; font-weight: 600; text-align: left; }
+    #toolbar button.on, #toolbar button:hover { border-color: var(--teal); color: var(--teal); }
+    #toolbar kbd { float: right; margin-left: 8px; }
+
+    #status-bar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; background: var(--glass); backdrop-filter: var(--blur);
+                  border: 1px solid var(--edge); border-radius: 999px; padding: 7px 16px; display: flex; gap: 16px; font-size: 11px; color: var(--muted); pointer-events: none; }
+    .status-item { display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+    .status-dot.warning { background: var(--gold); }
+    @media (max-width: 1000px) { #status-bar, #map-wrap { display: none; } }
+    #scene-info { display: none; }
   </style>
 </head>
 <body>
   <div id="canvas-container"></div>
-  <div id="ui-overlay">
-    <div class="panel top-left" id="search-panel">
-      <div class="panel-header">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-        <span>Spatial POI Search</span>
-      </div>
-      <div class="search-box">
-        <input type="text" id="search-input" placeholder="Search: fire extinguisher, espresso machine..." autocomplete="off">
-        <button id="search-btn">Search</button>
-      </div>
-      <div class="nav-info" id="nav-info">
-        <div class="row"><span class="label">Distance</span><span class="value" id="nav-distance">-</span></div>
-        <div class="row"><span class="label">Clearance</span><span class="value" id="nav-clearance">-</span></div>
-        <div class="row"><span class="label">Waypoints</span><span class="value" id="nav-waypoints">-</span></div>
-        <button class="clear-btn" id="clear-path-btn">Clear Path</button>
-      </div>
-      <div class="poi-results" id="poi-results"></div>
+
+  <header id="hud" class="panel">
+    <div class="eyebrow">Spatial engine · scene</div>
+    <div id="title">Scene twin</div>
+    <div id="subtitle">BOOTING SPATIAL TWIN…</div>
+  </header>
+
+  <div id="status-stamp">LIVE<span>LINKED SPACE</span></div>
+
+  <section id="search-panel" class="panel" aria-label="Spatial POI search">
+    <div class="panel-label">Find in scene</div>
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="fire extinguisher, espresso machine…" autocomplete="off">
+      <button id="search-btn">SEARCH</button>
     </div>
-    <div class="panel top-right" id="info-panel">
-      <div class="panel-header">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-        <span>Scene Info</span>
-      </div>
-      <div id="scene-info">Loading scene...</div>
+    <div class="nav-info" id="nav-info">
+      <div class="row"><span>DISTANCE</span><span class="value" id="nav-distance">-</span></div>
+      <div class="row"><span>CLEARANCE</span><span class="value" id="nav-clearance">-</span></div>
+      <div class="row"><span>WAYPOINTS</span><span class="value" id="nav-waypoints">-</span></div>
+      <button class="clear-btn" id="clear-path-btn" style="margin-top:6px;background:var(--paper);border:var(--line);padding:4px 8px;font-weight:700;font-size:11px;">CLEAR ROUTE</button>
     </div>
-    <div class="status-bar" id="status-bar">
-      <div class="status-item"><span class="status-dot" id="conn-status"></span><span id="conn-text">Connecting...</span></div>
-      <div class="status-item"><span class="status-dot" id="mesh-status"></span><span id="mesh-text">Mesh: -</span></div>
-      <div class="status-item"><span class="status-dot" id="splat-status"></span><span id="splat-text">Splats: -</span></div>
+    <div class="poi-results" id="poi-results"></div>
+  </section>
+
+  <aside id="ref-panel" class="panel empty" aria-label="Real frame reference">
+    <div class="panel-label">Captured frame</div>
+    <img id="ref-img" alt="Captured interior frame">
+    <small>Frame from the capture, same space as the twin</small>
+  </aside>
+
+  <section id="map-wrap" class="panel" aria-label="Navigation map">
+    <div class="panel-label">Overview</div>
+    <canvas id="minimap" width="500" height="500"></canvas>
+    <div id="map-legend">
+      <span><i class="sw-free"></i>open</span>
+      <span><i class="sw-obstacle"></i>blocked</span>
+      <span><i class="sw-unknown"></i>unseen</span>
+      <span><i class="sw-path"></i>capture</span>
+      <span id="legend-route" style="display:none"><i class="sw-route"></i>route</span>
+      <span id="legend-prop" style="display:none"><i class="sw-prop"></i>placed</span>
     </div>
-    <div class="hint">Double-click floor to navigate &bull; Type to search POIs &bull; WASD for manual walk</div>
+  </section>
+
+  <div id="center-hint">Enter the scene</div>
+  <div id="reticle" class="hidden"></div>
+  <div id="reticle-label" class="hidden"></div>
+  <div id="carry-hint" class="hidden"></div>
+  <div id="toast"></div>
+  <div id="readout"></div>
+
+  <section id="sandbox" class="panel hidden" aria-label="Sandbox controls">
+    <div class="sb-head"><span>Prop tray <em id="sandbox-count">0 placed</em></span><button id="sandbox-close" title="Exit (G)" aria-label="Exit sandbox">×</button></div>
+    <div class="panel-label">Objects · keys 1–4</div>
+    <div id="prop-palette">
+      <button data-prop="cone"><kbd>1</kbd> CONE</button>
+      <button data-prop="barrier"><kbd>2</kbd> BARRIER</button>
+      <button data-prop="crate"><kbd>3</kbd> CRATE</button>
+      <button data-prop="sign"><kbd>4</kbd> SIGN</button>
+    </div>
+    <div id="sandbox-carry-actions" class="hidden">
+      <button id="sandbox-place">Place</button>
+      <button id="sandbox-rotate">Rotate</button>
+      <button id="sandbox-cancel">Cancel</button>
+    </div>
+    <div id="sandbox-actions">
+      <button id="sandbox-route">Route to last</button>
+      <button id="sandbox-clear">Clear</button>
+      <button id="sandbox-share">Share</button>
+    </div>
+    <div id="sandbox-hint"><b>1—4</b> add · <b>click</b> place · <b>R</b> rotate · <b>DEL</b> remove · <b>T</b> route · <b>G</b> exit</div>
+  </section>
+
+  <div id="help"><b>WASD</b> move <b>M</b> overview <b>P</b> points <b>Shift</b> sprint <b>U</b> measure <b>G</b> prop tray
+    <span>Click the scene to take control · Esc releases</span></div>
+
+  <div id="toolbar">
+    <button id="btn-walk">Walk<kbd>F</kbd></button>
+    <button id="btn-plan">Overview<kbd>M</kbd></button>
+    <button id="btn-points">Points<kbd>P</kbd></button>
+    <button id="btn-measure">Measure<kbd>U</kbd></button>
+    <button id="btn-sandbox">Prop tray<kbd>G</kbd></button>
+    <button id="btn-link">Copy link</button>
   </div>
+
+  <div id="status-bar">
+    <div class="status-item"><span class="status-dot" id="conn-status"></span><span id="conn-text">Connecting…</span></div>
+    <div class="status-item"><span class="status-dot" id="mesh-status"></span><span id="mesh-text">Mesh: -</span></div>
+    <div class="status-item"><span class="status-dot" id="splat-status"></span><span id="splat-text">Splats: -</span></div>
+  </div>
+  <div id="scene-info"></div>
+
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

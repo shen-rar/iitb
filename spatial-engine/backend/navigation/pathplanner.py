@@ -41,6 +41,7 @@ class IndoorSpatialPathPlanner:
         self.walkable_mask: Optional[np.ndarray] = None
         self.esdf_meters: Optional[np.ndarray] = None
         self.floor_elevation_map: Optional[np.ndarray] = None
+        self.status_grid: Optional[np.ndarray] = None  # 0 unseen, 1 open, 2 blocked
 
     def build_navgrid_from_mesh(self, mesh: trimesh.Trimesh) -> None:
         """
@@ -92,6 +93,13 @@ class IndoorSpatialPathPlanner:
             distance_transform_edt(combined_free).astype(np.float32) * self.cell_size_m
         )
         self.walkable_mask = self.esdf_meters >= self.agent_radius_m
+
+        # Map status for the plan view: open = walkable, blocked = obstacle or floor too close
+        # to walls, unseen = no floor observed by the capture.
+        self.status_grid = np.zeros((nx, nz), dtype=np.uint8)
+        self.status_grid[raw_floor] = 2
+        self.status_grid[self.walkable_mask] = 1
+        self.status_grid[obstacle_grid] = 2
 
     def world_to_grid(self, x: float, z: float) -> Tuple[int, int]:
         ix = int(np.round((x - self.origin_xz[0]) / self.cell_size_m))

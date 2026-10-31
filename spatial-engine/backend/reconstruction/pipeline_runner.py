@@ -151,51 +151,19 @@ class ReconstructionPipeline:
         """
         aligner = MetricGravityAligner()
 
-        # Read COLMAP camera poses from sparse reconstruction
-        cameras_txt = sparse_dir / "0" / "images.txt"
-        camera_positions = []
+        # Camera centres / c2w rotations come from the binary sparse model via pycolmap
+        # (COLMAP's images.txt stores world-to-camera poses, not camera centres).
+        import pycolmap
+        import trimesh
+        from backend.reconstruction.pycolmap_pipeline import extract_geometry
 
-        if cameras_txt.exists():
-            with open(cameras_txt, "r") as f:
-                lines = f.readlines()
-            for i, line in enumerate(lines):
-                if line.startswith("#"):
-                    continue
-                parts = line.strip().split()
-                if len(parts) >= 8:
-                    # Lines with 8+ fields are image entries: IMAGE_ID QW QX QY QZ TX TY TZ ...
-                    qw, qx, qy, qz = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
-                    tx, ty, tz = float(parts[5]), float(parts[6]), float(parts[7])
-                    camera_positions.append([tx, ty, tz])
-
-        colmap_positions = np.array(camera_positions, dtype=np.float64) if camera_positions else None
-
-        # If ARKit VIO poses are available, use Umeyama Sim(3) for metric scale
-        arkit_positions = None
+        rec = pycolmap.Reconstruction(str(sparse_dir / "0"))
+        pts, _, centers, rots = extract_geometry(rec)
+        vio = None
         if arkit_poses_path and arkit_poses_path.exists():
             with open(arkit_poses_path, "r") as f:
-                arkit_data = json.load(f)
-            arkit_positions = np.array(
-                [pose["position"] for pose in arkit_data["frames"]],
-                dtype=np.float64,
-            )
-
-        if colmap_positions is not None and arkit_positions is not None:
-            # Full Sim(3) alignment with metric scale recovery
-            min_count = min(len(colmap_positions), len(arkit_positions))
-            sim3 = aligner.umeyama_sim3(
-                colmap_positions[:min_count],
-                arkit_positions[:min_count],
-            )
-        elif colmap_positions is not None:
-            # RANSAC floor plane alignment with default camera height assumption
-            sim3 = aligner.compute_canonical_sim3(
-                colmap_positions,
-                camera_up_hint=np.array([0.0, -1.0, 0.0]),
-                assumed_camera_height_m=DEFAULT_CAMERA_HEIGHT_M,
-            )
-        else:
-            sim3 = np.eye(4)
+                vio = np.array([p["position"] for p in json.load(f)["frames"]], dtype=np.float64)
+        sim3, _ = aligner.compute_canonical_sim3(trimesh.Trimesh(vertices=pts), centers, rots, vio)
 
         # Save the alignment matrix for downstream consumers
         np.save(str(self.artifacts_dir / "sim3_alignment.npy"), sim3)
